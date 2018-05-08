@@ -1,0 +1,203 @@
+# Contributor: Sascha Paunovic <azarus@posteo.net>
+# Contributor: Leonardo Arena <rnalrd@alpinelinux.org>
+# Contributor: Valery Kartel <valery.kartel@gmail.com>
+# Maintainer: Sascha Paunovic <azarus@posteo.net>
+pkgname=openssh-hpn
+pkgver=7.6_p1
+_myver=${pkgver%_*}${pkgver#*_}
+pkgrel=2
+pkgdesc="Port of OpenBSD's free SSH release, with HPN patchset applied"
+url="https://www.psc.edu/index.php/hpn-ssh"
+arch="all"
+license="BSD"
+options="suid"
+depends="openssh-hpn-client openssh-hpn-sftp-server openssh-hpn-server"
+makedepends_build="linux-pam-dev autoconf"
+makedepends_host="libressl-dev zlib-dev linux-headers"
+makedepends="$makedepends_build $makedepends_host"
+# Add more packages support here e.g. kerberos
+_pkgsupport=""
+[ -z "$BOOTSTRAP" ] && _pkgsupport="pam"
+subpackages="$pkgname-doc
+	$pkgname-keygen
+	$pkgname-client
+	$pkgname-keysign
+	$pkgname-sftp-server:sftp
+	$pkgname-server-common:server_common:noarch
+	$pkgname-server
+	"
+for _flavour in $_pkgsupport; do
+	subpackages="$subpackages ${pkgname}-server-$_flavour:_pkg_flavour"
+done
+
+source="${pkgname}-${pkgver}.tar.gz::https://github.com/rapier1/openssh-portable/archive/hpn-KitchenSink-7_6_P1.tar.gz
+	fix-utmp.patch
+	bsd-compatible-realpath.patch
+	sshd.initd
+	sshd.confd
+	sftp-interactive.patch
+	"
+# secfixes:
+#   7.5_p1-r8:
+#     - CVE-2017-15906
+#   7.4_p1-r0:
+#     - CVE-2016-10009
+#     - CVE-2016-10010
+#     - CVE-2016-10011
+#     - CVE-2016-10012
+
+builddir="$srcdir"/$pkgname-$_myver
+
+prepare() {
+	mv "$srcdir"/openssh-portable-hpn-KitchenSink-7_6_P1 "$srcdir"/$pkgname-${_myver}
+	cd "$builddir"
+	default_prepare
+	for _flavour in $_pkgsupport; do
+		cp -R "$srcdir"/$pkgname-$_myver "$srcdir"/$pkgname-${_myver}-$_flavour
+	done
+}
+
+build() {
+	cd "$builddir"
+	export LD="$CC"
+	autoreconf
+	_configure_vanilla="./configure \
+		--build=$CBUILD \
+		--host=$CHOST \
+		--prefix=/usr \
+		--sysconfdir=/etc/ssh \
+		--libexecdir=/usr/lib/ssh \
+		--mandir=/usr/share/man \
+		--with-pid-dir=/run \
+		--with-mantype=doc \
+		--with-ldflags='${LDFLAGS}' \
+		--disable-lastlog \
+		--disable-strip \
+		--disable-wtmp \
+		--with-privsep-path=/var/empty \
+		--with-xauth=/usr/bin/xauth \
+		--with-privsep-user=sshd \
+		--with-md5-passwords \
+		--with-ssl-engine \
+		"
+	# now we build "vanilla" openssh
+	_configure="$_configure_vanilla"
+	for _flavour in $_pkgsupport; do
+		_configure="$_configure --without-$_flavour"
+	done
+	msg "Building openssh-hpn..."
+	eval "$_configure"
+	make
+
+	# now we build other openssh-$_flavour
+	_configure="$_configure_vanilla"
+	for _flavour in $_pkgsupport; do
+		cd "$builddir-$_flavour"
+		msg "Building openssh-hpn with $_flavour support..."
+		autoreconf
+		eval "$_configure --with-$_flavour"
+		make
+	done
+}
+
+package() {
+	cd "$builddir"
+	make DESTDIR="$pkgdir" install
+	mkdir -p "$pkgdir"/var/empty
+	install -D -m755 "$srcdir"/sshd.initd \
+		"$pkgdir"/etc/init.d/sshd
+	install -D -m644 "$srcdir"/sshd.confd \
+		"$pkgdir"/etc/conf.d/sshd
+	install -Dm644 "$builddir"/contrib/ssh-copy-id.1 \
+		"$pkgdir"/usr/share/man/man1/ssh-copy-id.1
+	sed -i 's/#UseDNS yes/UseDNS no/' "$pkgdir"/etc/ssh/sshd_config
+}
+
+keygen() {
+	pkgdesc="ssh helper program for generating keys (hpn)"
+	depends=
+	install -d "$subpkgdir"/usr/bin
+	mv "$pkgdir"/usr/bin/ssh-keygen \
+		"$subpkgdir"/usr/bin/
+}
+
+client() {
+	pkgdesc="OpenBSD's SSH client (hpn)"
+	depends="openssh-hpn-keygen"
+	install -d "$subpkgdir"/usr/bin \
+		"$subpkgdir"/usr/lib/ssh \
+		"$subpkgdir"/etc/ssh \
+		"$subpkgdir"/var/empty
+
+	mv "$pkgdir"/usr/bin/* \
+		"$subpkgdir"/usr/bin/
+	mv "$pkgdir"/etc/ssh/ssh_config \
+		"$pkgdir"/etc/ssh/moduli \
+		"$subpkgdir"/etc/ssh/
+	install -Dm755 "$builddir"/contrib/findssl.sh \
+		"$subpkgdir"/usr/bin/findssl.sh
+	install -Dm755 "$builddir"/contrib/ssh-copy-id \
+		"$subpkgdir"/usr/bin/ssh-copy-id
+	install -Dm755	"$builddir"/ssh-pkcs11-helper \
+		"$subpkgdir"/usr/bin/ssh-pkcs11-helper
+}
+
+keysign() {
+	pkgdesc="ssh helper program for host-based authentication (hpn)"
+	depends="openssh-hpn-client"
+	install -d "$subpkgdir"/usr/lib/ssh
+	mv "$pkgdir"/usr/lib/ssh/ssh-keysign \
+		"$subpkgdir"/usr/lib/ssh/
+}
+
+sftp() {
+	pkgdesc="ssh sftp server module (hpn)"
+	depends=""
+	install -d "$subpkgdir"/usr/lib/ssh
+	mv "$pkgdir"/usr/lib/ssh/sftp-server \
+		"$subpkgdir"/usr/lib/ssh/
+}
+
+server_common() {
+	pkgdesc="OpenSSH server configuration files (hpn)"
+	depends=""
+	for i in etc/ssh/sshd_config \
+		etc/init.d/sshd \
+		etc/conf.d/sshd; do
+
+		install -d "$subpkgdir"/${i%/*}
+		mv "$pkgdir"/$i \
+			"$subpkgdir"/${i%/*}/
+
+	done
+}
+
+server() {
+	pkgdesc="OpenSSH server (hpn)"
+	depends="openssh-keygen openssh-server-common"
+	cd "$builddir"
+	install -d "$subpkgdir"/usr/sbin
+	mv "$pkgdir"/usr/sbin/sshd "$subpkgdir"/usr/sbin/
+}
+
+_server() {
+	cd "$builddir"
+	install -d "$subpkgdir"/usr/sbin
+	mv "$1"/sshd "$subpkgdir"/usr/sbin/
+}
+
+_pkg_flavour() {
+	pkgdesc="OpenSSH server with $_flavour support (hpn)"
+	depends="openssh-hpn-keygen openssh-hpn-server-common"
+	for _flavour in $_pkgsupport; do
+		cd "${builddir}"-$_flavour
+		_server "${builddir}"-$_flavour
+	done
+}
+
+sha512sums="bb329cbde2f6ab4d20da47e72b1b4c7a7a62e77b2d2255046cc504829a30a8f0ee73116677ff2c8e9a7b4d15a83a9fa1453454e778ee3a49a9d7087e65577aa6  openssh-hpn-7.6_p1.tar.gz
+f35fffcd26635249ce5d820e7b3e406e586f2d2d7f6a045f221e2f9fb53aebc1ab1dd1e603b3389462296ed77921a1d08456e7aaa3825cbed08f405b381a58e1  fix-utmp.patch
+f2b8daa537ea3f32754a4485492cc6eb3f40133ed46c0a5a29a89e4bcf8583d82d891d94bf2e5eb1c916fa68ec094abf4e6cd641e9737a6c05053808012b3a73  bsd-compatible-realpath.patch
+bcd56bebe37acb69986abd247d6b74daf7dde1712f30640244a1dd70c505a6a536c5536bef11345e128b6785e1c8ff9736627556e702218805fb14b23bd7047c  sshd.initd
+ec506156c286e5b28a530e9964dd68b7f6c9e881fbc47247a988e52a1f9cd50cbfaf4955c96774f9e2508d8b734c4abf98785fbaa75ae6249e3464b5495f1afc  sshd.confd
+c1d09c65dbc347f0904edc30f91aa9a24b0baee50309536182455b544f1e3f85a8cecfa959e32be8b101d8282ef06dde3febbbc3f315489339dcf04155c859a9  sftp-interactive.patch"
