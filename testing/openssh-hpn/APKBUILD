@@ -174,7 +174,7 @@ server_common() {
 
 server() {
 	pkgdesc="OpenSSH server (hpn)"
-	depends="openssh-keygen openssh-server-common"
+	depends="openssh-hpn-keygen openssh-hpn-server-common"
 	cd "$builddir"
 	install -d "$subpkgdir"/usr/sbin
 	mv "$pkgdir"/usr/sbin/sshd "$subpkgdir"/usr/sbin/
