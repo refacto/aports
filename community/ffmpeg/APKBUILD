@@ -14,7 +14,7 @@ subpackages="$pkgname-dev $pkgname-doc $pkgname-libs"
 makedepends="gnutls-dev lame-dev libvorbis-dev xvidcore-dev zlib-dev libvdpau-dev
 	imlib2-dev x264-dev libtheora-dev coreutils bzip2-dev perl-dev libvpx-dev
 	libvpx-dev sdl2-dev libxfixes-dev libva-dev alsa-lib-dev rtmpdump-dev
-	v4l-utils-dev yasm opus-dev x265-dev libass-dev"
+	v4l-utils-dev yasm opus-dev x265-dev libass-dev fdk-aac-dev"
 checkdepends="rsync"
 source="http://ffmpeg.org/releases/ffmpeg-$pkgver.tar.xz
 	0001-libavutil-clean-up-unused-FF_SYMVER-macro.patch
@@ -72,6 +72,8 @@ build() {
 		--enable-vaapi \
 		--enable-vdpau \
 		--enable-libopus \
+		--enable-libfdk-aac \
+		--enable-nonfree \
 		$_asm $_dbg
 	make
 	${CC:-gcc} -o tools/qt-faststart $CFLAGS tools/qt-faststart.c
